@@ -826,8 +826,36 @@ func TestValidateResourceQuantities(t *testing.T) {
 				i.Spec.Chromium.Resources.Requests.CPU = "100m"
 				i.Spec.Tailscale.Resources.Limits.Memory = "128Mi"
 				i.Spec.Ollama.Resources.Requests.CPU = "2"
+				i.Spec.Ollama.Storage.SizeLimit = "50Gi"
+				i.Spec.WebTerminal.Resources.Requests.CPU = "100m"
+				i.Spec.WebTerminal.Resources.Limits.Memory = "256Mi"
+				i.Spec.Chromium.Persistence.Size = "5Gi"
 			},
 			wantErr: false,
+		},
+		{
+			name: "Invalid Chromium persistence size",
+			mutate: func(i *openclawv1alpha1.OpenClawInstance) {
+				i.Spec.Chromium.Persistence.Size = "invalid"
+			},
+			wantErr: true,
+			errSub:  "spec.chromium.persistence.size",
+		},
+		{
+			name: "Invalid Ollama storage size limit",
+			mutate: func(i *openclawv1alpha1.OpenClawInstance) {
+				i.Spec.Ollama.Storage.SizeLimit = "invalid"
+			},
+			wantErr: true,
+			errSub:  "spec.ollama.storage.sizeLimit",
+		},
+		{
+			name: "Invalid Web terminal CPU request",
+			mutate: func(i *openclawv1alpha1.OpenClawInstance) {
+				i.Spec.WebTerminal.Resources.Requests.CPU = "abc"
+			},
+			wantErr: true,
+			errSub:  "spec.webTerminal.resources.requests.cpu",
 		},
 		{
 			name: "Invalid storage size",

@@ -18,9 +18,12 @@ package resources
 
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	openclawv1alpha1 "github.com/openclawrocks/k8s-operator/api/v1alpha1"
 )
+
+var rLog = ctrl.Log.WithName("resources")
 
 const (
 	// GatewayPort is the port for the OpenClaw gateway WebSocket server
@@ -291,6 +294,7 @@ func ParseQuantity(s, defaultValue string) resource.Quantity {
 	}
 	q, err := resource.ParseQuantity(s)
 	if err != nil {
+		rLog.Error(err, "Invalid quantity, falling back to default", "value", s, "default", defaultValue)
 		return resource.MustParse(defaultValue)
 	}
 	return q

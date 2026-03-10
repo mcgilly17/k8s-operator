@@ -1504,30 +1504,12 @@ func buildWebTerminalResourceRequirements(instance *openclawv1alpha1.OpenClawIns
 	}
 
 	// Requests
-	cpuReq := instance.Spec.WebTerminal.Resources.Requests.CPU
-	if cpuReq == "" {
-		cpuReq = "50m"
-	}
-	req.Requests[corev1.ResourceCPU] = resource.MustParse(cpuReq)
-
-	memReq := instance.Spec.WebTerminal.Resources.Requests.Memory
-	if memReq == "" {
-		memReq = "64Mi"
-	}
-	req.Requests[corev1.ResourceMemory] = resource.MustParse(memReq)
+	req.Requests[corev1.ResourceCPU] = ParseQuantity(instance.Spec.WebTerminal.Resources.Requests.CPU, "50m")
+	req.Requests[corev1.ResourceMemory] = ParseQuantity(instance.Spec.WebTerminal.Resources.Requests.Memory, "64Mi")
 
 	// Limits
-	cpuLim := instance.Spec.WebTerminal.Resources.Limits.CPU
-	if cpuLim == "" {
-		cpuLim = "200m"
-	}
-	req.Limits[corev1.ResourceCPU] = resource.MustParse(cpuLim)
-
-	memLim := instance.Spec.WebTerminal.Resources.Limits.Memory
-	if memLim == "" {
-		memLim = "128Mi"
-	}
-	req.Limits[corev1.ResourceMemory] = resource.MustParse(memLim)
+	req.Limits[corev1.ResourceCPU] = ParseQuantity(instance.Spec.WebTerminal.Resources.Limits.CPU, "200m")
+	req.Limits[corev1.ResourceMemory] = ParseQuantity(instance.Spec.WebTerminal.Resources.Limits.Memory, "128Mi")
 
 	return req
 }
@@ -1549,7 +1531,7 @@ func buildOllamaResourceRequirements(instance *openclawv1alpha1.OpenClawInstance
 
 	// GPU support
 	if instance.Spec.Ollama.GPU != nil && *instance.Spec.Ollama.GPU > 0 {
-		gpuQty := resource.MustParse(fmt.Sprintf("%d", *instance.Spec.Ollama.GPU))
+		gpuQty := ParseQuantity(fmt.Sprintf("%d", *instance.Spec.Ollama.GPU), "0")
 		req.Requests[corev1.ResourceName("nvidia.com/gpu")] = gpuQty
 		req.Limits[corev1.ResourceName("nvidia.com/gpu")] = gpuQty
 	}
@@ -1803,10 +1785,7 @@ func buildVolumes(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Resol
 			})
 		} else {
 			sizeLimit := instance.Spec.Ollama.Storage.SizeLimit
-			if sizeLimit == "" {
-				sizeLimit = "20Gi"
-			}
-			qty := resource.MustParse(sizeLimit)
+			qty := ParseQuantity(sizeLimit, "20Gi")
 			volumes = append(volumes, corev1.Volume{
 				Name: "ollama-models",
 				VolumeSource: corev1.VolumeSource{

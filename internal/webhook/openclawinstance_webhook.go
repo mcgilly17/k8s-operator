@@ -340,6 +340,11 @@ func validateResourceQuantities(instance *openclawv1alpha1.OpenClawInstance) err
 		return err
 	}
 
+	// Chromium persistence
+	if err := check("spec.chromium.persistence.size", instance.Spec.Chromium.Persistence.Size); err != nil {
+		return err
+	}
+
 	// Tailscale resources
 	tr := instance.Spec.Tailscale.Resources
 	if err := check("spec.tailscale.resources.requests.cpu", tr.Requests.CPU); err != nil {
@@ -367,6 +372,26 @@ func validateResourceQuantities(instance *openclawv1alpha1.OpenClawInstance) err
 		return err
 	}
 	if err := check("spec.ollama.resources.limits.memory", or.Limits.Memory); err != nil {
+		return err
+	}
+
+	// Ollama storage
+	if err := check("spec.ollama.storage.sizeLimit", instance.Spec.Ollama.Storage.SizeLimit); err != nil {
+		return err
+	}
+
+	// Web terminal resources
+	wr := instance.Spec.WebTerminal.Resources
+	if err := check("spec.webTerminal.resources.requests.cpu", wr.Requests.CPU); err != nil {
+		return err
+	}
+	if err := check("spec.webTerminal.resources.requests.memory", wr.Requests.Memory); err != nil {
+		return err
+	}
+	if err := check("spec.webTerminal.resources.limits.cpu", wr.Limits.CPU); err != nil {
+		return err
+	}
+	if err := check("spec.webTerminal.resources.limits.memory", wr.Limits.Memory); err != nil {
 		return err
 	}
 
