@@ -82,12 +82,12 @@ spec:
 
 | Field    | Type       | Default | Description                                                                                       |
 |----------|------------|---------|---------------------------------------------------------------------------------------------------|
-| `skills` | `[]string` | --      | Skills to install. Three formats supported: ClawHub identifiers (e.g., `@anthropic/mcp-server-fetch`), npm packages with `npm:` prefix (e.g., `npm:@openclaw/matrix`), and GitHub-hosted skill packs with `pack:` prefix (e.g., `pack:openclaw-rocks/skills/image-gen`). ClawHub installs are idempotent - already-installed skills are skipped gracefully, making restarts safe with persistent storage. npm lifecycle scripts are disabled for security. Max 20 items. |
+| `skills` | `[]string` | --      | Skills to install. Three formats supported: ClawHub identifiers (e.g., `mcp-server-fetch`), npm packages with `npm:` prefix (e.g., `npm:@openclaw/matrix`), and GitHub-hosted skill packs with `pack:` prefix (e.g., `pack:openclaw-rocks/skills/image-gen`). ClawHub installs are idempotent - already-installed skills are skipped gracefully, making restarts safe with persistent storage. npm lifecycle scripts are disabled for security. Max 20 items. |
 
 ```yaml
 spec:
   skills:
-    - "@anthropic/mcp-server-fetch"                         # ClawHub
+    - "mcp-server-fetch"                                     # ClawHub
     - "npm:@openclaw/matrix"                                # npm package
     - "pack:openclaw-rocks/skills/image-gen"                # skill pack (latest)
     - "pack:openclaw-rocks/skills/image-gen@v1.0.0"         # skill pack (pinned)
@@ -1111,7 +1111,7 @@ metadata:
 spec:
   instanceRef: my-agent
   addSkills:
-    - "@anthropic/mcp-server-fetch"
+    - "mcp-server-fetch"
   addEnvVars:
     - name: MY_CUSTOM_VAR
       value: "hello"
@@ -1152,7 +1152,7 @@ spec:
         Use the filesystem MCP server for file operations.
 
   skills:
-    - "@anthropic/mcp-server-fetch"
+    - "mcp-server-fetch"
     - "npm:@openclaw/matrix"
 
   envFrom:
