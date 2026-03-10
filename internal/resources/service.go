@@ -120,3 +120,36 @@ func buildServicePorts(instance *openclawv1alpha1.OpenClawInstance) []corev1.Ser
 
 	return ports
 }
+
+// BuildChromiumCDPService creates a headless Service for the Chromium CDP
+// endpoint with publishNotReadyAddresses=true. This ensures the CDP URL
+// resolves even before the pod is fully Ready, which is critical because the
+// main container (OpenClaw) checks CDP connectivity during startup — before
+// its own readiness probe has passed. Without this, the main ClusterIP Service
+// has no endpoints and the CDP health check fails permanently.
+func BuildChromiumCDPService(instance *openclawv1alpha1.OpenClawInstance) *corev1.Service {
+	labels := Labels(instance)
+	selectorLabels := SelectorLabels(instance)
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ChromiumCDPServiceName(instance),
+			Namespace: instance.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:                     corev1.ServiceTypeClusterIP,
+			ClusterIP:                corev1.ClusterIPNone, // headless
+			Selector:                 selectorLabels,
+			PublishNotReadyAddresses: true,
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "cdp",
+					Port:       int32(ChromiumPort),
+					TargetPort: intstr.FromInt32(int32(ChromiumPort)),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
+}

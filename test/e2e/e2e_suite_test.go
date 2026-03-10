@@ -1349,15 +1349,15 @@ var _ = Describe("OpenClawInstance Controller", func() {
 				}, statefulSet)
 			}, timeout, interval).Should(Succeed())
 
-			// Verify chromium container exists with correct port
+			// Verify chromium container exists as native sidecar init container with correct port
 			var chromiumContainer *corev1.Container
-			for i := range statefulSet.Spec.Template.Spec.Containers {
-				if statefulSet.Spec.Template.Spec.Containers[i].Name == "chromium" {
-					chromiumContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.InitContainers {
+				if statefulSet.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+					chromiumContainer = &statefulSet.Spec.Template.Spec.InitContainers[i]
 					break
 				}
 			}
-			Expect(chromiumContainer).NotTo(BeNil(), "chromium sidecar container should exist")
+			Expect(chromiumContainer).NotTo(BeNil(), "chromium sidecar init container should exist")
 			Expect(chromiumContainer.Image).To(Equal("ghcr.io/browserless/chromium:latest"))
 			Expect(chromiumContainer.Ports).To(HaveLen(1))
 			Expect(chromiumContainer.Ports[0].ContainerPort).To(Equal(int32(resources.ChromiumPort)))
@@ -1378,7 +1378,7 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			mainContainer := statefulSet.Spec.Template.Spec.Containers[0]
 			var foundChromiumCDP bool
 			expectedCDP := fmt.Sprintf("http://%s.%s.svc:%d",
-				resources.ServiceName(instance), instance.Namespace, resources.ChromiumPort)
+				resources.ChromiumCDPServiceName(instance), instance.Namespace, resources.ChromiumPort)
 			for _, env := range mainContainer.Env {
 				if env.Name == "OPENCLAW_CHROMIUM_CDP" {
 					foundChromiumCDP = true
@@ -1494,25 +1494,25 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			Expect(dataVol.PersistentVolumeClaim).NotTo(BeNil(), "chromium-data should be a PVC when persistence is enabled")
 			Expect(dataVol.PersistentVolumeClaim.ClaimName).To(Equal(instanceName + "-chromium-data"))
 
-			// Verify chromium container has --user-data-dir in launch args
+			// Verify chromium container has DATA_DIR env var for persistence
 			var chromiumContainer *corev1.Container
-			for i := range statefulSet.Spec.Template.Spec.Containers {
-				if statefulSet.Spec.Template.Spec.Containers[i].Name == "chromium" {
-					chromiumContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.InitContainers {
+				if statefulSet.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+					chromiumContainer = &statefulSet.Spec.Template.Spec.InitContainers[i]
 					break
 				}
 			}
-			Expect(chromiumContainer).NotTo(BeNil(), "chromium sidecar container should exist")
+			Expect(chromiumContainer).NotTo(BeNil(), "chromium sidecar init container should exist")
 
-			var launchArgs string
+			var dataDir string
 			for _, env := range chromiumContainer.Env {
-				if env.Name == "DEFAULT_LAUNCH_ARGS" {
-					launchArgs = env.Value
+				if env.Name == "DATA_DIR" {
+					dataDir = env.Value
 					break
 				}
 			}
-			Expect(launchArgs).To(ContainSubstring("--user-data-dir=/chromium-data"),
-				"DEFAULT_LAUNCH_ARGS should contain --user-data-dir=/chromium-data when persistence is enabled")
+			Expect(dataDir).To(Equal("/chromium-data"),
+				"DATA_DIR should be set to /chromium-data when persistence is enabled")
 
 			// Verify chromium container has chromium-data volume mount
 			var foundDataMount bool

@@ -413,6 +413,11 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	}
 	logger.V(1).Info("Service reconciled")
 
+	// 7b. Reconcile Chromium CDP headless Service (if chromium is enabled)
+	if err := r.reconcileChromiumCDPService(ctx, instance); err != nil {
+		return fmt.Errorf("failed to reconcile Chromium CDP Service: %w", err)
+	}
+
 	// 8. Reconcile Ingress (if enabled)
 	if err := r.reconcileIngress(ctx, instance); err != nil {
 		return fmt.Errorf("failed to reconcile Ingress: %w", err)
@@ -1095,6 +1100,32 @@ func (r *OpenClawInstanceReconciler) reconcileService(ctx context.Context, insta
 		Reason:  "ServiceCreated",
 		Message: "Service created successfully",
 	})
+
+	return nil
+}
+
+// reconcileChromiumCDPService reconciles the headless Service used for the
+// Chromium CDP endpoint. When chromium is disabled, the Service is deleted.
+func (r *OpenClawInstanceReconciler) reconcileChromiumCDPService(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance) error {
+	svc := &corev1.Service{}
+	svc.Name = resources.ChromiumCDPServiceName(instance)
+	svc.Namespace = instance.Namespace
+
+	if !instance.Spec.Chromium.Enabled {
+		if err := r.Delete(ctx, svc); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		desired := resources.BuildChromiumCDPService(instance)
+		svc.Labels = desired.Labels
+		svc.Spec = desired.Spec
+		return controllerutil.SetControllerReference(instance, svc, r.Scheme)
+	}); err != nil {
+		return err
+	}
 
 	return nil
 }
