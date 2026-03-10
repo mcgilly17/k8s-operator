@@ -205,10 +205,8 @@ func buildContainers(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenSe
 		containers = append(containers, buildTailscaleContainer(instance))
 	}
 
-	// Add Chromium sidecar if enabled
-	if instance.Spec.Chromium.Enabled {
-		containers = append(containers, buildChromiumContainer(instance))
-	}
+	// Chromium is now a native sidecar (init container with restartPolicy: Always)
+	// to guarantee it starts before the main container. See buildInitContainers.
 
 	// Add Ollama sidecar if enabled
 	if instance.Spec.Ollama.Enabled {
@@ -372,7 +370,7 @@ func buildMainEnv(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenSecre
 	}
 
 	if instance.Spec.Chromium.Enabled {
-		// Use the Kubernetes Service DNS name to reach the Chromium sidecar.
+		// Use the headless CDP Service DNS name to reach the Chromium sidecar.
 		// A non-loopback address triggers OpenClaw's remote/attach mode so
 		// the browser control service connects to the existing sidecar
 		// instead of trying to launch a local browser process.
@@ -380,11 +378,15 @@ func buildMainEnv(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenSecre
 		// (IPv6 addresses need brackets in URLs but Kubernetes env var
 		// interpolation cannot add them conditionally) and is stable
 		// across pod restarts (unlike status.podIP).
-		svcDNS := fmt.Sprintf("%s.%s.svc", ServiceName(instance), instance.Namespace)
+		// The headless CDP Service has publishNotReadyAddresses=true so the
+		// endpoint resolves before the pod is fully Ready, avoiding a race
+		// where OpenClaw checks CDP during startup before the main Service
+		// has endpoints.
+		cdpSvcDNS := fmt.Sprintf("%s.%s.svc", ChromiumCDPServiceName(instance), instance.Namespace)
 		env = append(env,
 			corev1.EnvVar{
 				Name:  "OPENCLAW_CHROMIUM_CDP",
-				Value: fmt.Sprintf("http://%s:%d", svcDNS, ChromiumPort),
+				Value: fmt.Sprintf("http://%s:%d", cdpSvcDNS, ChromiumPort),
 			},
 		)
 	}
@@ -557,6 +559,18 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 	// Ollama model-pulling init container (only if enabled and models are specified)
 	if instance.Spec.Ollama.Enabled && len(instance.Spec.Ollama.Models) > 0 {
 		initContainers = append(initContainers, buildOllamaModelPullInitContainer(instance))
+	}
+
+	// Chromium native sidecar (K8s 1.28+): starts before main containers and
+	// stays running for the pod's lifetime. This guarantees the Chromium CDP
+	// endpoint is ready before OpenClaw boots and performs its one-time CDP
+	// health check. Without this ordering guarantee, OpenClaw may check the
+	// CDP URL before the Service has endpoints and cache "unreachable"
+	// permanently (see #270).
+	if instance.Spec.Chromium.Enabled {
+		chromium := buildChromiumContainer(instance)
+		chromium.RestartPolicy = Ptr(corev1.ContainerRestartPolicyAlways)
+		initContainers = append(initContainers, chromium)
 	}
 
 	// Custom init containers (user-defined, run after operator-managed ones)
@@ -1282,26 +1296,22 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 		})
 	}
 
-	// Build Chrome launch args with anti-bot-detection defaults + user ExtraArgs.
-	// browserless v2 reads DEFAULT_LAUNCH_ARGS env var and forwards the flags
-	// to the Chrome process. Using container Args would override the image CMD
-	// and cause the first flag to be executed as a binary (issue #209).
-	allArgs := []string{
-		"--disable-blink-features=AutomationControlled",
-		"--disable-features=AutomationControlled",
-		"--no-first-run",
-	}
+	// NOTE: DEFAULT_LAUNCH_ARGS was deprecated in browserless v2.0.0 and is
+	// fully ignored. There is no replacement env var — Chrome launch args must
+	// be passed per-request via the `launch` query parameter on the WebSocket
+	// URL (e.g. ws://host:9222?launch={"args":["--no-sandbox"]}).
+	// Anti-bot flags and ExtraArgs are currently NOT applied.
+	// TODO(#270): pass launch args to OpenClaw so it includes them in its
+	// WebSocket connection URL to browserless.
+
 	// When persistence is enabled, direct Chromium to store its profile data
 	// on the persistent volume so cookies, localStorage, and session tokens
-	// survive pod restarts.
+	// survive pod restarts. USER_DATA_DIR is the browserless v2 env var for
+	// the default Chrome user data directory.
 	if instance.Spec.Chromium.Persistence.Enabled {
-		allArgs = append(allArgs, "--user-data-dir=/chromium-data")
-	}
-	allArgs = append(allArgs, instance.Spec.Chromium.ExtraArgs...)
-	if launchArgs, err := json.Marshal(allArgs); err == nil {
 		chromiumEnv = append(chromiumEnv, corev1.EnvVar{
-			Name:  "DEFAULT_LAUNCH_ARGS",
-			Value: string(launchArgs),
+			Name:  "DATA_DIR",
+			Value: "/chromium-data",
 		})
 	}
 

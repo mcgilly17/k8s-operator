@@ -152,6 +152,14 @@ func ServiceName(instance *openclawv1alpha1.OpenClawInstance) string {
 	return instance.Name
 }
 
+// ChromiumCDPServiceName returns the name of the headless Service used for
+// the Chromium CDP endpoint. A separate headless Service with
+// publishNotReadyAddresses is needed so the CDP URL resolves before the pod
+// is fully Ready (the main container may still be starting).
+func ChromiumCDPServiceName(instance *openclawv1alpha1.OpenClawInstance) string {
+	return instance.Name + "-cdp"
+}
+
 // ServiceAccountName returns the name of the ServiceAccount
 func ServiceAccountName(instance *openclawv1alpha1.OpenClawInstance) string {
 	if instance.Spec.Security.RBAC.ServiceAccountName != "" {

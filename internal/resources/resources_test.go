@@ -430,30 +430,36 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 	containers := sts.Spec.Template.Spec.Containers
+	initContainers := sts.Spec.Template.Spec.InitContainers
 
-	if len(containers) != 3 {
-		t.Fatalf("expected 3 containers (main + gateway-proxy + chromium), got %d", len(containers))
+	if len(containers) != 2 {
+		t.Fatalf("expected 2 containers (main + gateway-proxy), got %d", len(containers))
 	}
 
-	// Find chromium container
+	// Find chromium in init containers (native sidecar)
 	var chromium *corev1.Container
-	for i := range containers {
-		if containers[i].Name == "chromium" {
-			chromium = &containers[i]
+	for i := range initContainers {
+		if initContainers[i].Name == "chromium" {
+			chromium = &initContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
-	// Main container should have OPENCLAW_CHROMIUM_CDP using service DNS name
+	// Native sidecar: RestartPolicy must be Always
+	if chromium.RestartPolicy == nil || *chromium.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("chromium RestartPolicy = %v, want Always (native sidecar)", chromium.RestartPolicy)
+	}
+
+	// Main container should have OPENCLAW_CHROMIUM_CDP using CDP service DNS name
 	mainContainer := containers[0]
 	foundChromiumCDP := false
 	for _, env := range mainContainer.Env {
 		if env.Name == "OPENCLAW_CHROMIUM_CDP" {
 			foundChromiumCDP = true
-			expected := fmt.Sprintf("http://%s.%s.svc:%d", instance.Name, instance.Namespace, ChromiumPort)
+			expected := fmt.Sprintf("http://%s-cdp.%s.svc:%d", instance.Name, instance.Namespace, ChromiumPort)
 			if env.Value != expected {
 				t.Errorf("OPENCLAW_CHROMIUM_CDP = %q, want %q", env.Value, expected)
 			}
@@ -567,16 +573,11 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 		t.Error("chromium-data should be emptyDir when persistence is disabled")
 	}
 
-	// Without persistence, --user-data-dir should NOT be in launch args
-	var launchArgs string
+	// DEFAULT_LAUNCH_ARGS should not exist anymore
 	for _, env := range chromium.Env {
 		if env.Name == "DEFAULT_LAUNCH_ARGS" {
-			launchArgs = env.Value
-			break
+			t.Error("DEFAULT_LAUNCH_ARGS env var should not be set on chromium container")
 		}
-	}
-	if strings.Contains(launchArgs, "--user-data-dir") {
-		t.Error("--user-data-dir should not be set when persistence is disabled")
 	}
 }
 
@@ -591,34 +592,26 @@ func TestBuildStatefulSet_ChromiumExtraArgs(t *testing.T) {
 	sts := BuildStatefulSet(instance, "", nil)
 
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
-	// ExtraArgs must NOT be set as container Args - that overwrites the image CMD
-	// and causes the first flag to be executed as a binary (issue #209).
+	// ExtraArgs must NOT be set as container Args
 	if len(chromium.Args) != 0 {
-		t.Errorf("expected no container Args (ExtraArgs must use DEFAULT_LAUNCH_ARGS env), got %v", chromium.Args)
+		t.Errorf("expected no container Args, got %v", chromium.Args)
 	}
 
-	// ExtraArgs must be encoded as DEFAULT_LAUNCH_ARGS JSON env var for browserless v2
-	// Default anti-bot-detection flags are prepended, then user ExtraArgs appended
-	var launchArgs string
+	// DEFAULT_LAUNCH_ARGS no longer exists; ExtraArgs are currently not applied (TODO)
 	for _, env := range chromium.Env {
 		if env.Name == "DEFAULT_LAUNCH_ARGS" {
-			launchArgs = env.Value
-			break
+			t.Error("DEFAULT_LAUNCH_ARGS env var should not be set on chromium container")
 		}
-	}
-	const wantLaunchArgs = `["--disable-blink-features=AutomationControlled","--disable-features=AutomationControlled","--no-first-run","--window-size=1920,1080","--user-agent=CustomAgent/1.0"]`
-	if launchArgs != wantLaunchArgs {
-		t.Errorf("DEFAULT_LAUNCH_ARGS = %q, want %q", launchArgs, wantLaunchArgs)
 	}
 }
 
@@ -633,14 +626,14 @@ func TestBuildStatefulSet_ChromiumExtraEnv(t *testing.T) {
 	sts := BuildStatefulSet(instance, "", nil)
 
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
 	// Operator-managed PORT env must still be present
@@ -677,34 +670,28 @@ func TestBuildStatefulSet_ChromiumExtraEnv(t *testing.T) {
 func TestBuildStatefulSet_ChromiumNoExtraArgs(t *testing.T) {
 	instance := newTestInstance("chromium-no-args")
 	instance.Spec.Chromium.Enabled = true
-	// ExtraArgs not set - DEFAULT_LAUNCH_ARGS should still contain anti-bot defaults
+	// ExtraArgs not set - DEFAULT_LAUNCH_ARGS should not exist
 
 	sts := BuildStatefulSet(instance, "", nil)
 
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
 	if len(chromium.Args) != 0 {
 		t.Errorf("expected no container Args, got %v", chromium.Args)
 	}
-	var launchArgs string
 	for _, env := range chromium.Env {
 		if env.Name == "DEFAULT_LAUNCH_ARGS" {
-			launchArgs = env.Value
-			break
+			t.Error("DEFAULT_LAUNCH_ARGS env var should not be set on chromium container")
 		}
-	}
-	const wantDefaults = `["--disable-blink-features=AutomationControlled","--disable-features=AutomationControlled","--no-first-run"]`
-	if launchArgs != wantDefaults {
-		t.Errorf("DEFAULT_LAUNCH_ARGS = %q, want %q", launchArgs, wantDefaults)
 	}
 }
 
@@ -1168,14 +1155,14 @@ func TestBuildStatefulSet_ChromiumCustomImage(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 	if chromium.Image != "my-registry.io/chromium:v120" {
 		t.Errorf("chromium image = %q, want %q", chromium.Image, "my-registry.io/chromium:v120")
@@ -1193,14 +1180,14 @@ func TestBuildStatefulSet_ChromiumDigest(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 	expected := "my-registry.io/chromium@sha256:chromiumhash"
 	if chromium.Image != expected {
@@ -3771,14 +3758,14 @@ func TestBuildStatefulSet_ChromiumCustomResources(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
 	cpuReq := chromium.Resources.Requests[corev1.ResourceCPU]
@@ -4022,18 +4009,25 @@ func TestBuildStatefulSet_InitContainerDefaults(t *testing.T) {
 	}
 }
 
-// TestBuildStatefulSet_ChromiumContainerDefaults verifies the chromium sidecar
+// TestBuildStatefulSet_ChromiumContainerDefaults verifies the chromium native sidecar
 // includes Kubernetes default fields.
 func TestBuildStatefulSet_ChromiumContainerDefaults(t *testing.T) {
 	instance := newTestInstance("chromium-defaults")
 	instance.Spec.Chromium.Enabled = true
 
 	sts := BuildStatefulSet(instance, "", nil)
-	if len(sts.Spec.Template.Spec.Containers) < 2 {
-		t.Fatal("expected chromium sidecar container")
+
+	var chromium *corev1.Container
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if chromium == nil {
+		t.Fatal("chromium init container not found")
 	}
 
-	chromium := sts.Spec.Template.Spec.Containers[1]
 	if chromium.TerminationMessagePath != corev1.TerminationMessagePathDefault {
 		t.Errorf("chromium TerminationMessagePath = %q, want %q", chromium.TerminationMessagePath, corev1.TerminationMessagePathDefault)
 	}
@@ -4061,27 +4055,30 @@ func TestBuildStatefulSet_ChromiumPersistenceEnabled(t *testing.T) {
 		t.Errorf("PVC claim name = %q, want %q", dataVol.PersistentVolumeClaim.ClaimName, "chromium-persist-chromium-data")
 	}
 
-	// --user-data-dir should be in DEFAULT_LAUNCH_ARGS
+	// DATA_DIR env var should be set to /chromium-data when persistence is enabled
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
-	var launchArgs string
+	foundDataDir := false
 	for _, env := range chromium.Env {
-		if env.Name == "DEFAULT_LAUNCH_ARGS" {
-			launchArgs = env.Value
+		if env.Name == "DATA_DIR" {
+			foundDataDir = true
+			if env.Value != "/chromium-data" {
+				t.Errorf("DATA_DIR = %q, want %q", env.Value, "/chromium-data")
+			}
 			break
 		}
 	}
-	if !strings.Contains(launchArgs, "--user-data-dir=/chromium-data") {
-		t.Errorf("DEFAULT_LAUNCH_ARGS should contain --user-data-dir=/chromium-data, got %q", launchArgs)
+	if !foundDataDir {
+		t.Error("DATA_DIR env var should be set to /chromium-data when persistence is enabled")
 	}
 
 	// Volume mount should exist
@@ -5711,16 +5708,16 @@ func TestBuildStatefulSet_CABundle_WithChromium(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 
-	// Find chromium container
+	// Find chromium in init containers (native sidecar)
 	var chromium *corev1.Container
-	for i := range sts.Spec.Template.Spec.Containers {
-		if sts.Spec.Template.Spec.Containers[i].Name == "chromium" {
-			chromium = &sts.Spec.Template.Spec.Containers[i]
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+			chromium = &sts.Spec.Template.Spec.InitContainers[i]
 			break
 		}
 	}
 	if chromium == nil {
-		t.Fatal("chromium container not found")
+		t.Fatal("chromium init container not found")
 	}
 
 	// Check mount
@@ -7758,9 +7755,10 @@ func TestBuildStatefulSet_OllamaAndChromiumEnabled(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil)
 	containers := sts.Spec.Template.Spec.Containers
+	initContainers := sts.Spec.Template.Spec.InitContainers
 
-	if len(containers) != 4 {
-		t.Fatalf("expected 4 containers (main + gateway-proxy + chromium + ollama), got %d", len(containers))
+	if len(containers) != 3 {
+		t.Fatalf("expected 3 containers (main + gateway-proxy + ollama), got %d", len(containers))
 	}
 
 	names := make(map[string]bool)
@@ -7770,11 +7768,17 @@ func TestBuildStatefulSet_OllamaAndChromiumEnabled(t *testing.T) {
 	if !names["openclaw"] {
 		t.Error("main container not found")
 	}
-	if !names["chromium"] {
-		t.Error("chromium container not found")
-	}
 	if !names["ollama"] {
 		t.Error("ollama container not found")
+	}
+
+	// Chromium should be in init containers (native sidecar)
+	initNames := make(map[string]bool)
+	for _, c := range initContainers {
+		initNames[c.Name] = true
+	}
+	if !initNames["chromium"] {
+		t.Error("chromium init container not found")
 	}
 
 	// Both env vars should be present on main container
@@ -7814,7 +7818,7 @@ func TestBuildStatefulSet_OllamaAndChromiumEnabled(t *testing.T) {
 
 	// Init container for model pull
 	foundInitOllama := false
-	for _, ic := range sts.Spec.Template.Spec.InitContainers {
+	for _, ic := range initContainers {
 		if ic.Name == "init-ollama" {
 			foundInitOllama = true
 			break
@@ -9309,6 +9313,54 @@ func TestBuildNetworkPolicy_WebTerminalIngressPort(t *testing.T) {
 	}
 }
 
+func TestBuildNetworkPolicy_ChromiumIngressAndEgress(t *testing.T) {
+	instance := newTestInstance("np-chromium")
+	instance.Spec.Chromium.Enabled = true
+
+	np := BuildNetworkPolicy(instance)
+
+	// Ingress: chromium port (9222) should be in ingress ports
+	if len(np.Spec.Ingress) == 0 {
+		t.Fatal("expected at least one ingress rule")
+	}
+
+	ports := np.Spec.Ingress[0].Ports
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ingress ports with chromium (gateway, canvas, chromium), got %d", len(ports))
+	}
+
+	foundChromiumIngress := false
+	for _, p := range ports {
+		if p.Port != nil && p.Port.IntValue() == ChromiumPort {
+			foundChromiumIngress = true
+			break
+		}
+	}
+	if !foundChromiumIngress {
+		t.Error("chromium port not found in NetworkPolicy ingress ports")
+	}
+
+	// Egress: should have a rule for chromium CDP (self-traffic on port 9222)
+	foundChromiumEgress := false
+	for _, rule := range np.Spec.Egress {
+		for _, p := range rule.Ports {
+			if p.Port != nil && p.Port.IntValue() == ChromiumPort {
+				foundChromiumEgress = true
+				// Verify it targets the same pod via pod selector
+				if len(rule.To) != 1 {
+					t.Errorf("chromium egress rule should have 1 peer, got %d", len(rule.To))
+				} else if rule.To[0].PodSelector == nil {
+					t.Error("chromium egress rule should use podSelector for self-traffic")
+				}
+				break
+			}
+		}
+	}
+	if !foundChromiumEgress {
+		t.Error("chromium egress rule (port 9222) not found in NetworkPolicy")
+	}
+}
+
 func TestBuildStatefulSet_WebTerminalReadOnlyWithCredential(t *testing.T) {
 	instance := newTestInstance("wt-readonly-cred")
 	instance.Spec.WebTerminal.Enabled = true
@@ -10126,7 +10178,8 @@ func TestBuildStatefulSet_PodLevelRunAsNonRootFalse_Propagation(t *testing.T) {
 	}
 
 	// Chromium should STILL have runAsNonRoot: true (has its own RunAsUser: 999)
-	for _, c := range containers {
+	// Chromium is now a native sidecar in InitContainers
+	for _, c := range initContainers {
 		if c.Name == "chromium" {
 			if c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot {
 				t.Error("chromium: runAsNonRoot should still be true (self-consistent with RunAsUser: 999)")
@@ -10282,19 +10335,24 @@ func TestBuildStatefulSet_FullNonRootFalseScenario(t *testing.T) {
 			if *c.SecurityContext.RunAsUser != 101 {
 				t.Error("gateway-proxy: runAsUser should be 101")
 			}
-		case "chromium":
-			if !*c.SecurityContext.RunAsNonRoot {
-				t.Error("chromium: runAsNonRoot should be true (self-consistent)")
-			}
-			if *c.SecurityContext.RunAsUser != 999 {
-				t.Error("chromium: runAsUser should be 999")
-			}
 		case "ollama":
 			if *c.SecurityContext.RunAsNonRoot {
 				t.Error("ollama: runAsNonRoot should be false (always root)")
 			}
 			if *c.SecurityContext.RunAsUser != 0 {
 				t.Error("ollama: runAsUser should be 0")
+			}
+		}
+	}
+
+	// Chromium is a native sidecar in InitContainers
+	for _, c := range sts.Spec.Template.Spec.InitContainers {
+		if c.Name == "chromium" {
+			if !*c.SecurityContext.RunAsNonRoot {
+				t.Error("chromium: runAsNonRoot should be true (self-consistent)")
+			}
+			if *c.SecurityContext.RunAsUser != 999 {
+				t.Error("chromium: runAsUser should be 999")
 			}
 		}
 	}
