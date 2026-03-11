@@ -1705,6 +1705,11 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			// Script should also contain clawhub for non-prefixed skill
 			Expect(script).To(ContainSubstring("_install_skill 'mcp-server-fetch'"),
 				"non-prefixed skill should use _install_skill wrapper with normalized slug")
+			// Script should redirect /app/skills to PVC (#313)
+			Expect(script).To(ContainSubstring("mkdir -p /home/openclaw/.openclaw/skills"),
+				"script should create PVC-backed skills directory")
+			Expect(script).To(ContainSubstring("ln -s /home/openclaw/.openclaw/skills /app/skills"),
+				"script should symlink /app/skills to PVC")
 
 			// NPM_CONFIG_IGNORE_SCRIPTS should be set (#91)
 			envMap := map[string]string{}
@@ -1713,6 +1718,25 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			}
 			Expect(envMap["NPM_CONFIG_IGNORE_SCRIPTS"]).To(Equal("true"),
 				"NPM_CONFIG_IGNORE_SCRIPTS should be true for supply chain security")
+
+			// Main container should mount PVC at /app/skills (#313)
+			var mainContainer *corev1.Container
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == "openclaw" {
+					mainContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+					break
+				}
+			}
+			Expect(mainContainer).NotTo(BeNil(), "main container should exist")
+			var hasSkillsMount bool
+			for _, m := range mainContainer.VolumeMounts {
+				if m.MountPath == "/app/skills" && m.Name == "data" && m.SubPath == "skills" {
+					hasSkillsMount = true
+					break
+				}
+			}
+			Expect(hasSkillsMount).To(BeTrue(),
+				"main container should mount PVC subpath 'skills' at /app/skills")
 
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 		})

@@ -4850,6 +4850,9 @@ func TestBuildSkillsScript_WithSkills(t *testing.T) {
 	if !strings.HasPrefix(script, "set -e\n") {
 		t.Error("script should start with set -e")
 	}
+	if !strings.Contains(script, clawHubSkillsSetup) {
+		t.Error("script should contain clawhub skills setup (PVC redirect)")
+	}
 	if !strings.Contains(script, skillInstallWrapper) {
 		t.Error("script should contain the _install_skill wrapper")
 	}
@@ -4873,6 +4876,9 @@ func TestBuildSkillsScript_MixedPrefixes(t *testing.T) {
 
 	if !strings.HasPrefix(script, "set -e\n") {
 		t.Error("script should start with set -e")
+	}
+	if !strings.Contains(script, clawHubSkillsSetup) {
+		t.Error("script should contain clawhub skills setup (PVC redirect)")
 	}
 	if !strings.Contains(script, skillInstallWrapper) {
 		t.Error("script should contain the _install_skill wrapper (has clawhub skills)")
@@ -4899,6 +4905,9 @@ func TestBuildSkillsScript_OnlyNpmSkills_NoWrapper(t *testing.T) {
 	}
 	if strings.Contains(script, "_install_skill") {
 		t.Error("script should not contain _install_skill wrapper when only npm skills")
+	}
+	if strings.Contains(script, clawHubSkillsSetup) {
+		t.Error("script should not contain clawhub skills setup when only npm skills")
 	}
 	if !strings.Contains(script, "npm install") {
 		t.Error("script should contain npm install commands")
@@ -4933,14 +4942,18 @@ func TestBuildSkillsScript_WrapperOrdering(t *testing.T) {
 	script := BuildSkillsScript(instance)
 
 	setEIdx := strings.Index(script, "set -e")
+	setupIdx := strings.Index(script, "mkdir -p /home/openclaw/.openclaw/skills")
 	wrapperIdx := strings.Index(script, "_install_skill()")
 	installIdx := strings.Index(script, "_install_skill 'mcp-server-fetch'")
 
-	if setEIdx == -1 || wrapperIdx == -1 || installIdx == -1 {
+	if setEIdx == -1 || setupIdx == -1 || wrapperIdx == -1 || installIdx == -1 {
 		t.Fatalf("missing expected content in script:\n%s", script)
 	}
-	if setEIdx >= wrapperIdx {
-		t.Error("set -e must come before the wrapper function")
+	if setEIdx >= setupIdx {
+		t.Error("set -e must come before the skills setup")
+	}
+	if setupIdx >= wrapperIdx {
+		t.Error("skills setup must come before the wrapper function")
 	}
 	if wrapperIdx >= installIdx {
 		t.Error("wrapper function must come before install commands")
@@ -5113,6 +5126,66 @@ func TestBuildStatefulSet_NoSkills_NoSkillsTmpVolume(t *testing.T) {
 	skillsTmpVol := findVolume(sts.Spec.Template.Spec.Volumes, "skills-tmp")
 	if skillsTmpVol != nil {
 		t.Error("skills-tmp volume should not exist without skills")
+	}
+}
+
+func TestBuildStatefulSet_ClawHubSkills_MainContainerSkillsMount(t *testing.T) {
+	instance := newTestInstance("clawhub-skills-mount")
+	instance.Spec.Skills = []string{"@anthropic/mcp-server-fetch"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+
+	var mainContainer *corev1.Container
+	for i := range sts.Spec.Template.Spec.Containers {
+		if sts.Spec.Template.Spec.Containers[i].Name == "openclaw" {
+			mainContainer = &sts.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	if mainContainer == nil {
+		t.Fatal("main container not found")
+	}
+
+	// ClawHub skills should cause a PVC subpath mount at /app/skills (#313)
+	var found bool
+	for _, m := range mainContainer.VolumeMounts {
+		if m.MountPath == "/app/skills" {
+			found = true
+			if m.Name != "data" {
+				t.Errorf("skills mount volume name = %q, want \"data\"", m.Name)
+			}
+			if m.SubPath != "skills" {
+				t.Errorf("skills mount subpath = %q, want \"skills\"", m.SubPath)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("main container should have /app/skills volume mount for ClawHub skills")
+	}
+}
+
+func TestBuildStatefulSet_NpmOnlySkills_NoMainSkillsMount(t *testing.T) {
+	instance := newTestInstance("npm-only-mount")
+	instance.Spec.Skills = []string{"npm:@openclaw/matrix"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+
+	var mainContainer *corev1.Container
+	for i := range sts.Spec.Template.Spec.Containers {
+		if sts.Spec.Template.Spec.Containers[i].Name == "openclaw" {
+			mainContainer = &sts.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	if mainContainer == nil {
+		t.Fatal("main container not found")
+	}
+
+	for _, m := range mainContainer.VolumeMounts {
+		if m.MountPath == "/app/skills" {
+			t.Error("main container should NOT have /app/skills mount when only npm skills")
+		}
 	}
 }
 

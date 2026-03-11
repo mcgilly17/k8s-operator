@@ -323,6 +323,16 @@ func buildMainContainer(instance *openclawv1alpha1.OpenClawInstance, gatewayToke
 	// Add extra volume mounts from spec
 	container.VolumeMounts = append(container.VolumeMounts, instance.Spec.ExtraVolumeMounts...)
 
+	// Mount PVC-backed skills directory at /app/skills so ClawHub-installed
+	// skills persist and are visible to the main container (#313).
+	if hasClawHubSkills(FilterNonPackSkills(instance.Spec.Skills)) {
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      "data",
+			MountPath: "/app/skills",
+			SubPath:   "skills",
+		})
+	}
+
 	// Mount the config volume read-only so the postStart hook can restore
 	// operator-managed config on every container start (init containers only
 	// run on pod creation, not on container restarts within the same pod).
@@ -702,6 +712,14 @@ func BuildInitScript(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Re
 	return strings.Join(lines, "\n")
 }
 
+// clawHubSkillsSetup prepares a PVC-backed skills directory in the init
+// container. It seeds built-in skills from the container image on first run
+// (cp -rn = no-clobber), then redirects /app/skills to the PVC via symlink
+// so clawhub install writes to persistent storage (#313).
+const clawHubSkillsSetup = `mkdir -p /home/openclaw/.openclaw/skills
+cp -rn /app/skills/. /home/openclaw/.openclaw/skills/ 2>/dev/null || true
+rm -rf /app/skills && ln -s /home/openclaw/.openclaw/skills /app/skills`
+
 // skillInstallWrapper is a shell function that wraps `clawhub install` to
 // tolerate "Already installed" errors, making the init container idempotent
 // when persistent storage is enabled (#258).
@@ -770,6 +788,7 @@ func BuildSkillsScript(instance *openclawv1alpha1.OpenClawInstance) string {
 	var lines []string
 	lines = append(lines, "set -e")
 	if hasClawHubSkills(skills) {
+		lines = append(lines, clawHubSkillsSetup)
 		lines = append(lines, skillInstallWrapper)
 	}
 	for _, skill := range skills {
