@@ -4187,12 +4187,14 @@ func TestBuildWorkspaceConfigMap_Nil(t *testing.T) {
 	instance.Spec.Workspace = nil
 
 	cm := BuildWorkspaceConfigMap(instance, nil)
-	// ENVIRONMENT.md is always injected
+	// Operator files are always injected
 	if cm == nil {
-		t.Fatal("expected non-nil ConfigMap (ENVIRONMENT.md is always injected)")
+		t.Fatal("expected non-nil ConfigMap (operator files are always injected)")
 	}
-	if _, ok := cm.Data["ENVIRONMENT.md"]; !ok {
-		t.Error("expected ENVIRONMENT.md in workspace ConfigMap")
+	for _, f := range []string{"ENVIRONMENT.md", "BOOTSTRAP.md"} {
+		if _, ok := cm.Data[f]; !ok {
+			t.Errorf("expected %s in workspace ConfigMap", f)
+		}
 	}
 }
 
@@ -4203,12 +4205,14 @@ func TestBuildWorkspaceConfigMap_EmptyFiles(t *testing.T) {
 	}
 
 	cm := BuildWorkspaceConfigMap(instance, nil)
-	// ENVIRONMENT.md is always injected
+	// Operator files are always injected
 	if cm == nil {
-		t.Fatal("expected non-nil ConfigMap (ENVIRONMENT.md is always injected)")
+		t.Fatal("expected non-nil ConfigMap (operator files are always injected)")
 	}
-	if _, ok := cm.Data["ENVIRONMENT.md"]; !ok {
-		t.Error("expected ENVIRONMENT.md in workspace ConfigMap")
+	for _, f := range []string{"ENVIRONMENT.md", "BOOTSTRAP.md"} {
+		if _, ok := cm.Data[f]; !ok {
+			t.Errorf("expected %s in workspace ConfigMap", f)
+		}
 	}
 }
 
@@ -4231,9 +4235,9 @@ func TestBuildWorkspaceConfigMap_WithFiles(t *testing.T) {
 	if cm.Namespace != "test-ns" {
 		t.Errorf("ConfigMap namespace = %q, want %q", cm.Namespace, "test-ns")
 	}
-	// 2 user files + ENVIRONMENT.md = 3
-	if len(cm.Data) != 3 {
-		t.Fatalf("expected 3 data entries (2 user + ENVIRONMENT.md), got %d", len(cm.Data))
+	// 2 user files + ENVIRONMENT.md + BOOTSTRAP.md = 4
+	if len(cm.Data) != 4 {
+		t.Fatalf("expected 4 data entries (2 user + ENVIRONMENT.md + BOOTSTRAP.md), got %d", len(cm.Data))
 	}
 	if cm.Data["SOUL.md"] != "# Personality\nBe helpful." {
 		t.Errorf("SOUL.md content mismatch")
@@ -4241,8 +4245,10 @@ func TestBuildWorkspaceConfigMap_WithFiles(t *testing.T) {
 	if cm.Data["AGENTS.md"] != "# Agents config" {
 		t.Errorf("AGENTS.md content mismatch")
 	}
-	if _, ok := cm.Data["ENVIRONMENT.md"]; !ok {
-		t.Error("expected ENVIRONMENT.md in workspace ConfigMap")
+	for _, f := range []string{"ENVIRONMENT.md", "BOOTSTRAP.md"} {
+		if _, ok := cm.Data[f]; !ok {
+			t.Errorf("expected %s in workspace ConfigMap", f)
+		}
 	}
 }
 
@@ -4275,8 +4281,8 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// envSeedLines is the init script suffix that seeds ENVIRONMENT.md (always present).
-const envSeedLines = "mkdir -p /data/workspace\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'"
+// operatorSeedLines is the init script suffix that seeds operator-injected workspace files (always present).
+const operatorSeedLines = "mkdir -p /data/workspace\n[ -f /data/workspace/'BOOTSTRAP.md' ] || cp /workspace-init/'BOOTSTRAP.md' /data/workspace/'BOOTSTRAP.md'\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'"
 
 func TestBuildInitScript_ConfigOnly(t *testing.T) {
 	instance := newTestInstance("init-config-only")
@@ -4285,7 +4291,7 @@ func TestBuildInitScript_ConfigOnly(t *testing.T) {
 	}
 
 	script := BuildInitScript(instance, nil)
-	expected := "cp /config/'openclaw.json' /data/openclaw.json\n" + envSeedLines
+	expected := "cp /config/'openclaw.json' /data/openclaw.json\n" + operatorSeedLines
 	if script != expected {
 		t.Errorf("unexpected script:\ngot:  %q\nwant: %q", script, expected)
 	}
@@ -4301,7 +4307,7 @@ func TestBuildInitScript_WorkspaceOnly(t *testing.T) {
 	}
 
 	script := BuildInitScript(instance, nil)
-	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace/'memory'\nmkdir -p /data/workspace\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'\n[ -f /data/workspace/'SOUL.md' ] || cp /workspace-init/'SOUL.md' /data/workspace/'SOUL.md'"
+	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace/'memory'\nmkdir -p /data/workspace\n[ -f /data/workspace/'BOOTSTRAP.md' ] || cp /workspace-init/'BOOTSTRAP.md' /data/workspace/'BOOTSTRAP.md'\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'\n[ -f /data/workspace/'SOUL.md' ] || cp /workspace-init/'SOUL.md' /data/workspace/'SOUL.md'"
 	if script != expected {
 		t.Errorf("unexpected script:\ngot:  %q\nwant: %q", script, expected)
 	}
@@ -4322,10 +4328,10 @@ func TestBuildInitScript_Both(t *testing.T) {
 
 	script := BuildInitScript(instance, nil)
 
-	// Verify all expected lines are present (sorted order, ENVIRONMENT.md included)
+	// Verify all expected lines are present (sorted order, operator files included)
 	lines := strings.Split(script, "\n")
-	if len(lines) != 7 {
-		t.Fatalf("expected 7 lines, got %d:\n%s", len(lines), script)
+	if len(lines) != 8 {
+		t.Fatalf("expected 8 lines, got %d:\n%s", len(lines), script)
 	}
 	if lines[0] != "cp /config/'openclaw.json' /data/openclaw.json" {
 		t.Errorf("line 0: %q", lines[0])
@@ -4342,11 +4348,14 @@ func TestBuildInitScript_Both(t *testing.T) {
 	if lines[4] != "[ -f /data/workspace/'AGENTS.md' ] || cp /workspace-init/'AGENTS.md' /data/workspace/'AGENTS.md'" {
 		t.Errorf("line 4: %q", lines[4])
 	}
-	if lines[5] != "[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'" {
+	if lines[5] != "[ -f /data/workspace/'BOOTSTRAP.md' ] || cp /workspace-init/'BOOTSTRAP.md' /data/workspace/'BOOTSTRAP.md'" {
 		t.Errorf("line 5: %q", lines[5])
 	}
-	if lines[6] != "[ -f /data/workspace/'SOUL.md' ] || cp /workspace-init/'SOUL.md' /data/workspace/'SOUL.md'" {
+	if lines[6] != "[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'" {
 		t.Errorf("line 6: %q", lines[6])
+	}
+	if lines[7] != "[ -f /data/workspace/'SOUL.md' ] || cp /workspace-init/'SOUL.md' /data/workspace/'SOUL.md'" {
+		t.Errorf("line 7: %q", lines[7])
 	}
 }
 
@@ -4357,7 +4366,7 @@ func TestBuildInitScript_DirsOnly(t *testing.T) {
 	}
 
 	script := BuildInitScript(instance, nil)
-	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace/'memory'\nmkdir -p /data/workspace/'tools/scripts'\n" + envSeedLines
+	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace/'memory'\nmkdir -p /data/workspace/'tools/scripts'\n" + operatorSeedLines
 	if script != expected {
 		t.Errorf("unexpected script:\ngot:  %q\nwant: %q", script, expected)
 	}
@@ -4372,7 +4381,7 @@ func TestBuildInitScript_ShellQuotesSpecialChars(t *testing.T) {
 	}
 
 	script := BuildInitScript(instance, nil)
-	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'\n[ -f /data/workspace/'it'\\''s a file.md' ] || cp /workspace-init/'it'\\''s a file.md' /data/workspace/'it'\\''s a file.md'"
+	expected := "cp /config/'openclaw.json' /data/openclaw.json\nmkdir -p /data/workspace\n[ -f /data/workspace/'BOOTSTRAP.md' ] || cp /workspace-init/'BOOTSTRAP.md' /data/workspace/'BOOTSTRAP.md'\n[ -f /data/workspace/'ENVIRONMENT.md' ] || cp /workspace-init/'ENVIRONMENT.md' /data/workspace/'ENVIRONMENT.md'\n[ -f /data/workspace/'it'\\''s a file.md' ] || cp /workspace-init/'it'\\''s a file.md' /data/workspace/'it'\\''s a file.md'"
 	if script != expected {
 		t.Errorf("unexpected script:\ngot:  %q\nwant: %q", script, expected)
 	}
@@ -4398,7 +4407,7 @@ func TestBuildInitScript_VanillaDeployment(t *testing.T) {
 	instance := newTestInstance("init-empty")
 	script := BuildInitScript(instance, nil)
 	// Vanilla deployments get config copy + ENVIRONMENT.md seeding
-	expected := "cp /config/'openclaw.json' /data/openclaw.json\n" + envSeedLines
+	expected := "cp /config/'openclaw.json' /data/openclaw.json\n" + operatorSeedLines
 	if script != expected {
 		t.Errorf("unexpected script:\ngot:  %q\nwant: %q", script, expected)
 	}
@@ -8425,12 +8434,14 @@ func TestBuildWorkspaceConfigMap_SelfConfigureDisabledNoFiles(t *testing.T) {
 
 	cm := BuildWorkspaceConfigMap(instance, nil)
 
-	// ENVIRONMENT.md is always injected, so ConfigMap is never nil
+	// Operator files are always injected, so ConfigMap is never nil
 	if cm == nil {
-		t.Fatal("expected non-nil ConfigMap (ENVIRONMENT.md is always injected)")
+		t.Fatal("expected non-nil ConfigMap (operator files are always injected)")
 	}
-	if _, ok := cm.Data["ENVIRONMENT.md"]; !ok {
-		t.Error("expected ENVIRONMENT.md in workspace ConfigMap")
+	for _, f := range []string{"ENVIRONMENT.md", "BOOTSTRAP.md"} {
+		if _, ok := cm.Data[f]; !ok {
+			t.Errorf("expected %s in workspace ConfigMap", f)
+		}
 	}
 	if _, ok := cm.Data["SELFCONFIG.md"]; ok {
 		t.Error("SELFCONFIG.md should not be present when self-configure is disabled")
@@ -10139,15 +10150,17 @@ func TestBuildWorkspaceConfigMap_NilWorkspace(t *testing.T) {
 	instance := newTestInstance("ws-nil")
 	instance.Spec.Workspace = nil
 	cm := BuildWorkspaceConfigMap(instance, nil)
-	// ENVIRONMENT.md is always injected, so the ConfigMap is never nil
+	// Operator files are always injected, so the ConfigMap is never nil
 	if cm == nil {
-		t.Fatal("expected non-nil ConfigMap (ENVIRONMENT.md is always injected)")
+		t.Fatal("expected non-nil ConfigMap (operator files are always injected)")
 	}
-	if _, ok := cm.Data["ENVIRONMENT.md"]; !ok {
-		t.Error("expected ENVIRONMENT.md in workspace ConfigMap")
+	for _, f := range []string{"ENVIRONMENT.md", "BOOTSTRAP.md"} {
+		if _, ok := cm.Data[f]; !ok {
+			t.Errorf("expected %s in workspace ConfigMap", f)
+		}
 	}
-	if len(cm.Data) != 1 {
-		t.Errorf("expected exactly 1 file (ENVIRONMENT.md), got %d", len(cm.Data))
+	if len(cm.Data) != 2 {
+		t.Errorf("expected exactly 2 files (ENVIRONMENT.md + BOOTSTRAP.md), got %d", len(cm.Data))
 	}
 }
 

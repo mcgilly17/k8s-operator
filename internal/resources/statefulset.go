@@ -660,8 +660,9 @@ func BuildInitScript(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Re
 				allFiles[name] = true
 			}
 		}
-		// Always inject environment documentation
+		// Always inject operator files
 		allFiles["ENVIRONMENT.md"] = true
+		allFiles["BOOTSTRAP.md"] = true
 		if instance.Spec.SelfConfigure.Enabled {
 			allFiles["SELFCONFIG.md"] = true
 			allFiles["selfconfig.sh"] = true
@@ -1047,7 +1048,7 @@ uv --version`
 }
 
 // hasWorkspaceFiles returns true if the instance has workspace files to seed.
-// Always returns true because the operator always injects ENVIRONMENT.md.
+// Always returns true because the operator always injects ENVIRONMENT.md and BOOTSTRAP.md.
 func hasWorkspaceFiles(_ *openclawv1alpha1.OpenClawInstance, _ *ResolvedSkillPacks) bool {
 	return true
 }
