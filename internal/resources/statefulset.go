@@ -40,9 +40,6 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 	labels := Labels(instance)
 	selectorLabels := SelectorLabels(instance)
 
-	// Calculate config hash for rollout trigger
-	configHash := calculateConfigHash(instance)
-
 	gwSecretName := gatewayTokenSecretName
 
 	sts := &appsv1.StatefulSet{
@@ -68,10 +65,8 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-					Annotations: map[string]string{
-						"openclaw.rocks/config-hash": configHash,
-					},
+					Labels:      labels,
+					Annotations: buildPodAnnotations(instance),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            ServiceAccountName(instance),
@@ -101,6 +96,16 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 	)
 
 	return sts
+}
+
+// buildPodAnnotations builds the pod annotations for the pod template
+func buildPodAnnotations(instance *openclawv1alpha1.OpenClawInstance) map[string]string {
+	annotations := make(map[string]string, len(instance.Spec.PodAnnotations)+1)
+	for k, v := range instance.Spec.PodAnnotations {
+		annotations[k] = v
+	}
+	annotations["openclaw.rocks/config-hash"] = calculateConfigHash(instance)
+	return annotations
 }
 
 // buildPodSecurityContext creates the pod-level security context

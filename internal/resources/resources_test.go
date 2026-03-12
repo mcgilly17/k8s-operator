@@ -1265,6 +1265,52 @@ func TestBuildStatefulSet_TopologySpreadConstraints_Empty(t *testing.T) {
 	}
 }
 
+func TestBuildStatefulSet_PodAnnotations_UserAnnotationsPresent(t *testing.T) {
+	instance := newTestInstance("pod-ann-test")
+	instance.Spec.PodAnnotations = map[string]string{
+		"cluster-autoscaler.kubernetes.io/safe-to-evict": "false",
+		"custom.io/label": "value",
+	}
+
+	sts := BuildStatefulSet(instance, "", nil)
+	ann := sts.Spec.Template.Annotations
+
+	if ann["cluster-autoscaler.kubernetes.io/safe-to-evict"] != "false" {
+		t.Errorf("expected safe-to-evict=false, got %q", ann["cluster-autoscaler.kubernetes.io/safe-to-evict"])
+	}
+	if ann["custom.io/label"] != "value" {
+		t.Errorf("expected custom.io/label=value, got %q", ann["custom.io/label"])
+	}
+}
+
+func TestBuildStatefulSet_PodAnnotations_OperatorKeyWins(t *testing.T) {
+	instance := newTestInstance("pod-ann-conflict")
+	instance.Spec.PodAnnotations = map[string]string{
+		"openclaw.rocks/config-hash": "user-supplied-value",
+	}
+
+	sts := BuildStatefulSet(instance, "", nil)
+	ann := sts.Spec.Template.Annotations
+
+	if ann["openclaw.rocks/config-hash"] == "user-supplied-value" {
+		t.Error("operator-managed config-hash should not be overridable by user podAnnotations")
+	}
+	if ann["openclaw.rocks/config-hash"] == "" {
+		t.Error("config-hash annotation should still be present")
+	}
+}
+
+func TestBuildStatefulSet_PodAnnotations_NilStillHasConfigHash(t *testing.T) {
+	instance := newTestInstance("pod-ann-nil")
+
+	sts := BuildStatefulSet(instance, "", nil)
+	ann := sts.Spec.Template.Annotations
+
+	if _, ok := ann["openclaw.rocks/config-hash"]; !ok {
+		t.Error("config-hash annotation must always be present even when podAnnotations is nil")
+	}
+}
+
 func TestBuildStatefulSet_EnvAndEnvFrom(t *testing.T) {
 	instance := newTestInstance("env-test")
 	instance.Spec.Env = []corev1.EnvVar{

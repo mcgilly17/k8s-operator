@@ -889,6 +889,18 @@ spec:
             app.kubernetes.io/instance: my-instance
 ```
 
+### Pod Annotations
+
+Merge extra annotations into the StatefulSet pod template. Operator-managed keys (`openclaw.rocks/config-hash`, `openclaw.rocks/secret-hash`) always take precedence and cannot be overridden.
+
+Useful for cloud-provider hints, such as preventing GKE Autopilot from evicting long-running agent pods:
+
+```yaml
+spec:
+  podAnnotations:
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+```
+
 Phases: `Pending` -> `Restoring` -> `Provisioning` -> `Running` | `Updating` | `BackingUp` | `Degraded` | `Failed` | `Terminating`
 
 ## Deployment Guides
