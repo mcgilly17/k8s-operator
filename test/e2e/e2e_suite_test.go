@@ -1706,8 +1706,8 @@ var _ = Describe("OpenClawInstance Controller", func() {
 
 			// Script should contain npm install for npm: prefixed skill
 			script := skillsContainer.Command[2]
-			Expect(script).To(ContainSubstring("npm install '@openclaw/matrix'"),
-				"npm: prefixed skill should use npm install")
+			Expect(script).To(ContainSubstring("npm install -g '@openclaw/matrix'"),
+				"npm: prefixed skill should use global npm install")
 			// Script should also contain clawhub for non-prefixed skill
 			Expect(script).To(ContainSubstring("_install_skill 'mcp-server-fetch'"),
 				"non-prefixed skill should use _install_skill wrapper with normalized slug")
