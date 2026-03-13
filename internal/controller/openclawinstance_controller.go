@@ -1042,6 +1042,11 @@ func (r *OpenClawInstanceReconciler) reconcileStatefulSet(ctx context.Context, i
 		}
 	}
 
+	// Build the desired StatefulSet once and reuse for both VCT comparison
+	// and the CreateOrUpdate mutate func.
+	desired := resources.BuildStatefulSet(instance, gwSecretName, skillPacks)
+	resources.NormalizeStatefulSet(desired)
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      resources.StatefulSetName(instance),
@@ -1053,8 +1058,6 @@ func (r *OpenClawInstanceReconciler) reconcileStatefulSet(ctx context.Context, i
 	// transitions (e.g. enabling/disabling HPA with persistence) and
 	// delete+recreate the StatefulSet when VCTs need to change.
 	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(sts), sts); err == nil {
-		desired := resources.BuildStatefulSet(instance, gwSecretName, skillPacks)
-		resources.NormalizeStatefulSet(desired)
 		if !resources.VolumeClaimTemplatesEqual(sts.Spec.VolumeClaimTemplates, desired.Spec.VolumeClaimTemplates) {
 			log.FromContext(ctx).Info("VolumeClaimTemplates changed, recreating StatefulSet")
 			if err := r.Client.Delete(ctx, sts); err != nil {
@@ -1073,8 +1076,6 @@ func (r *OpenClawInstanceReconciler) reconcileStatefulSet(ctx context.Context, i
 		},
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
-		desired := resources.BuildStatefulSet(instance, gwSecretName, skillPacks)
-		resources.NormalizeStatefulSet(desired)
 		sts.Labels = desired.Labels
 		// Preserve current replica count when HPA manages scaling
 		existingReplicas := sts.Spec.Replicas
